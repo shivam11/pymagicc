@@ -10,17 +10,27 @@ import f90nml
 
 from pymagicc.api import MAGICCBase, MAGICC6, MAGICC7, config, _clean_value
 
-@pytest.fixture(scope="module")
+magicc_classes = [MAGICC6, MAGICC7]
+
+@pytest.fixture(scope="function")
 def magicc_base():
     yield MAGICCBase()
 
-@pytest.fixture(scope="module", params=[MAGICC6, MAGICC7])
+@pytest.fixture(scope="function", params=magicc_classes)
+def magicc_class(request):
+    check_available(request.param())
+    yield request.param
+
+def check_available(magicc_cls):
+    if magicc_cls.executable is None or not exists(magicc_cls.original_dir):
+        pytest.skip('MAGICC {} is not available'.format(magicc_cls.version))
+
+@pytest.fixture(scope="module", params=magicc_classes)
 def package(request):
     MAGICC_cls = request.param
     p = MAGICC_cls()
+    check_available(p)
 
-    if p.executable is None or not exists(p.original_dir):
-        pytest.skip('MAGICC {} is not available'.format(p.version))
     p.create_copy()
     root_dir = p.root_dir
     yield p
@@ -327,3 +337,12 @@ def test_integration_diagnose_tcr_ecs(package):
     if isinstance(package, MAGICC6):
         assert actual_result['tcr'] == 1.9733976000000002 # MAGICC6 shipped with pymagicc should be stable
         assert actual_result['ecs'] == 2.9968448 # MAGICC6 shipped with pymagicc should be stable
+
+def test_persistant_state(magicc_class):
+    with magicc_class() as magicc:
+        test_ecs = 1.75
+        magicc.set_config(
+            CORE_CLIMATESENSITIVITY=test_ecs,
+        )
+        actual_results = magicc.diagnose_tcr_ecs()
+        assert actual_results['ecs'] == test_ecs # test will need to change to handle numerical precision when fixed
